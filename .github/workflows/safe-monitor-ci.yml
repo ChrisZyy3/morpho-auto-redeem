@@ -2,7 +2,7 @@ name: Safe monitor tests
 
 on:
   push:
-    branches: ["master", "feat/safe-morpho-auto-exit"]
+    branches: ["master", "feat/safe-morpho-auto-exit", "feat/scoped-morpho-auto-exit"]
   pull_request:
 
 permissions:
@@ -21,8 +21,32 @@ jobs:
           corepack enable
           pnpm install --frozen-lockfile --ignore-scripts
       - name: Test arithmetic and read-only monitor integration
-        run: node --test src/modes/auto-withdraw/safe-math.test.mjs src/modes/auto-withdraw/safe-monitor.test.mjs
+        run: node --test src/modes/auto-withdraw/safe-math.test.mjs src/modes/auto-withdraw/safe-monitor.test.mjs src/modes/safe-exit/engine.test.mjs
       - name: Check monitoring scripts parse
         run: |
           node --check src/modes/auto-withdraw/safe-math.mjs
           node --check src/modes/auto-withdraw/safe-monitor.mjs
+          node --check scripts/check-rpc.mjs
+
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.9.0
+      - name: Install locked dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Contract tests and build
+        run: |
+          forge test -vv
+          forge build
+      - name: Local EVM signed withdrawal integration
+        env:
+          ANVIL_BIN: anvil
+        run: node --test src/modes/safe-exit/runtime.evm.test.mjs

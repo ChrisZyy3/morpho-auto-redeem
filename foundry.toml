@@ -1,0 +1,13 @@
+[profile.default]
+src = "contracts"
+test = "contracts/test"
+out = "artifacts/solidity"
+cache_path = "cache/solidity"
+solc_version = "0.8.28"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+bytecode_hash = "none"
+
+[fuzz]
+runs = 256
