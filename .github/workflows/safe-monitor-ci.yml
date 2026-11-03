@@ -16,8 +16,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Test monitoring arithmetic
-        run: node --test src/modes/auto-withdraw/safe-math.test.mjs
+      - name: Install locked dependencies (no lifecycle scripts)
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Test arithmetic and read-only monitor integration
+        run: node --test src/modes/auto-withdraw/safe-math.test.mjs src/modes/auto-withdraw/safe-monitor.test.mjs
       - name: Check monitoring scripts parse
         run: |
           node --check src/modes/auto-withdraw/safe-math.mjs
