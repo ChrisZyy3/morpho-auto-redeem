@@ -26,6 +26,7 @@ jobs:
         run: |
           node --check src/modes/auto-withdraw/safe-math.mjs
           node --check src/modes/auto-withdraw/safe-monitor.mjs
+          node --check scripts/check-rpc.mjs
 
   contracts:
     runs-on: ubuntu-latest

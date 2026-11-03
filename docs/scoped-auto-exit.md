@@ -37,7 +37,10 @@ nonce. A pending transaction prevents a fresh withdrawal. Signed bytes and the l
 hash are fsynced before broadcasting. On broadcast uncertainty it retries identical
 bytes after 30 seconds; it does not create a replacement or increment nonce.
 
-Receipts need CONFIRMATIONS blocks (default 3). Reverts consume gas budget and are
+Receipts must match the current canonical block hash and the latest account nonce
+must show the pending transaction was consumed before recovery state is cleared.
+Orphan or inconsistent receipts preserve pending state. Receipts need
+CONFIRMATIONS blocks (default 3). Reverts consume gas budget and are
 reported as reverts. Success also requires a USDC Transfer event from Morpho to
 the fixed owner; the confirmed log includes the received raw USDC units. Cost is charged to the UTC day on which the transaction was
 reserved, even if confirmation crosses midnight. Nonce rollback stops execution.
@@ -109,5 +112,19 @@ ANVIL_BIN=anvil node --test src/modes/safe-exit/runtime.evm.test.mjs
 
 The Anvil integration test uses a local EVM with mock Morpho/USDC, ephemeral test
 keys and synthetic balances. It verifies real signing, broadcast, confirmations,
-journal state and USDC delivery to owner rather than bot. It is not a mainnet fork,
-backend acceptance, deployed-contract audit, or evidence of real withdrawals.
+journal state and USDC delivery to owner rather than bot, and a reorg with a stale
+receipt backend. It is not a deployed-contract audit or evidence of real withdrawals.
+
+An optional separate fork suite runs the adapter against real Morpho/USDC code and
+an existing supply position at a pinned mainnet block. All impersonation, test
+liquidity and withdrawals remain in the local fork; nothing is broadcast:
+
+```bash
+FORK_RPC_URL="$RPC_URL" FORK_OWNER="$OWNER_ADDRESS" FORK_BLOCK=26333079 \
+  forge test --match-contract ScopedMorphoForkTest -vv
+```
+
+Use the owner public address only. Without FORK_RPC_URL/FORK_OWNER the fork suite
+is explicitly skipped; CI does not count skipped fork tests as passes. The public
+RPC must support historical state at the selected block. See the independent
+review record and `docs/rpc-connection-check.md` for route diagnosis.

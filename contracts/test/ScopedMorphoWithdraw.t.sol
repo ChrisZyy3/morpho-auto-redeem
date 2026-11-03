@@ -6,6 +6,7 @@ interface Vm {
     function etch(address, bytes calldata) external;
     function prank(address) external;
     function expectRevert(bytes4) external;
+    function expectRevert() external;
 }
 contract MockMorpho is IMorphoWithdraw {
     address public lastOwner;
@@ -13,6 +14,8 @@ contract MockMorpho is IMorphoWithdraw {
     address public lastCaller;
     bool public authorized = true;
     bool public reenter;
+    address public callback;
+    function setCallback(address target) external { callback=target; }
     uint256 public available = 1000e6;
     function configure(bool auth, uint256 amount, bool recursive) external { authorized=auth; available=amount; reenter=recursive; }
     function idToMarketParams(bytes32 id) external pure returns (MarketParams memory) {
@@ -22,12 +25,34 @@ contract MockMorpho is IMorphoWithdraw {
     function withdraw(MarketParams memory p, uint256 assets, uint256 shares, address holder, address receiver) external returns(uint256,uint256) {
         require(authorized, "NOT_AUTHORIZED");
         require(p.loanToken == 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
-        if (reenter) ScopedMorphoWithdraw(msg.sender).withdraw(1, 0);
+        if (reenter) {
+            if(callback==address(0)) ScopedMorphoWithdraw(msg.sender).withdraw(1,0);
+            else {
+                (bool ok,bytes memory data)=callback.call(abi.encodeWithSignature("reenter()"));
+                if(!ok) assembly {revert(add(data,32),mload(data))}
+            }
+        }
         uint256 amount = assets == 0 ? shares : assets;
         require(amount <= available, "NO_LIQUIDITY");
         available -= amount;
         lastCaller=msg.sender; lastOwner=holder; lastReceiver=receiver;
         return (amount, shares == 0 ? assets : shares);
+    }
+}
+contract ReenteringOperator {
+    ScopedMorphoWithdraw public executor;
+    function bind(ScopedMorphoWithdraw value) external { executor=value; }
+    function begin() external { executor.withdraw(1,0); }
+    function reenter() external { executor.withdraw(1,0); }
+}
+contract WrongTokenMorpho {
+    function idToMarketParams(bytes32) external pure returns(MarketParams memory) {
+        return MarketParams(address(0),address(0),address(0),address(0),0);
+    }
+}
+contract WrongCollateralMorpho {
+    function idToMarketParams(bytes32) external pure returns(MarketParams memory) {
+        return MarketParams(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48,address(0),address(0),address(0),0);
     }
 }
 contract ScopedMorphoWithdrawTest {
@@ -94,4 +119,52 @@ contract ScopedMorphoWithdrawTest {
         vm.prank(BOT); executor.withdraw(assets,0);
         require(MockMorpho(MORPHO).lastReceiver() == OWNER);
     }
+    function testAuthorizedOperatorReentryHitsGuardAndRollsBack() public {
+        ReenteringOperator actor=new ReenteringOperator();
+        ScopedMorphoWithdraw target=new ScopedMorphoWithdraw(OWNER,address(actor));
+        actor.bind(target);
+        MockMorpho(MORPHO).setCallback(address(actor));
+        MockMorpho(MORPHO).configure(true,1000e6,true);
+        vm.expectRevert(ScopedMorphoWithdraw.Reentrant.selector);
+        actor.begin();
+        MockMorpho(MORPHO).configure(true,1000e6,false);
+        actor.begin(); // proves entered guard recovery; canonical accounting rollback is tested on the fork
+    }
+    function testZeroOperatorRejected() public {
+        vm.expectRevert(ScopedMorphoWithdraw.InvalidConfiguration.selector);
+        new ScopedMorphoWithdraw(OWNER,address(0));
+    }
+    function testWrongTokensRejectedAtDeployment() public {
+        WrongTokenMorpho bad=new WrongTokenMorpho();
+        vm.etch(MORPHO,address(bad).code);
+        vm.expectRevert(ScopedMorphoWithdraw.InvalidConfiguration.selector);
+        new ScopedMorphoWithdraw(OWNER,BOT);
+    }
+    function testMissingMorphoCodeRejectedAtDeployment() public {
+        vm.etch(MORPHO,hex"");
+        vm.expectRevert();new ScopedMorphoWithdraw(OWNER,BOT);
+    }
+    function testCanonicalBorrowCollateralAndArbitrarySelectorsRejected() public {
+        MarketParams memory p=MockMorpho(MORPHO).idToMarketParams(executor.MARKET_ID());
+        vm.prank(BOT);
+        (bool borrowOk,)=address(executor).call(abi.encodeWithSignature(
+            "borrow((address,address,address,address,uint256),uint256,uint256,address,address)",p,1,0,OWNER,BOT));
+        vm.prank(BOT);
+        (bool collateralOk,)=address(executor).call(abi.encodeWithSignature(
+            "withdrawCollateral((address,address,address,address,uint256),uint256,address,address)",p,1,OWNER,BOT));
+        vm.prank(BOT);(bool arbitraryOk,)=address(executor).call(hex"ffffffff");
+        require(!borrowOk && !collateralOk && !arbitraryOk);
+    }
+
+    function testCorrectLoanWrongCollateralRejectedAtDeployment() public {
+        WrongCollateralMorpho bad=new WrongCollateralMorpho();
+        vm.etch(MORPHO,address(bad).code);
+        vm.expectRevert(ScopedMorphoWithdraw.InvalidConfiguration.selector);
+        new ScopedMorphoWithdraw(OWNER,BOT);
+    }
+    function testMalformedMorphoResponseRejectedAtDeployment() public {
+        vm.etch(MORPHO,hex"60016000f3");
+        vm.expectRevert();new ScopedMorphoWithdraw(OWNER,BOT);
+    }
+
 }

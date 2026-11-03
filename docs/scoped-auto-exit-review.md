@@ -54,3 +54,68 @@ mainnet acceptance remain outstanding.
 
 Summary: Standards 2 findings addressed (worst: safe recovery diagnostics); Spec 3
 findings fixed and rechecked (worst: withdrawal cap/daily budget correctness).
+
+
+## Independent security review follow-up (2026-11-03)
+
+Two fresh reviewers independently examined contract authority and client transaction
+recovery at 43c94c0. No bot wallet/key, mainnet deployment or mainnet authorization
+was needed. The production contract source was unchanged by this follow-up.
+
+### Contract lane
+
+No confirmed exploitable contract vulnerability was found within the reviewed scope.
+The reviewer traced fixed market/owner/recipient, account-wide permission containment,
+constructor, pause/revoke and reachable calls. The runtime has no arbitrary call,
+borrow/collateral path, upgrade, delegatecall or selfdestruct.
+
+The reviewer correctly found that the old reentry test hit Unauthorized rather than
+Reentrant. A new authorized contract-operator callback now checks the exact guard
+error and guard recovery. Added zero-operator, wrong-token, missing-code and
+canonical forbidden-selector tests. There are now 20 isolated Solidity tests, including correct-loan/wrong-collateral
+and malformed-response checks.
+
+The optional real-mainnet fork suite additionally validates canonical Morpho ABI,
+USDC delivery to the actual position owner, absence/revocation of authorization,
+and liquidity-failure rollback using real protocol/token code. The 5 fork tests
+use locally injected test liquidity; they are not mainnet transactions.
+
+### Client lane
+
+One additional P2 issue was reproduced: an orphan receipt from an inconsistent RPC
+backend could falsely confirm a withdrawal and clear its signed pending record.
+The new regression was observed failing before the fix (withdraw_confirmed instead
+of receipt_inconsistent). The fix checks canonical block hash in the runtime and
+rechecks latest account nonce after receipt retrieval before finalization. Pending
+state is preserved on disagreement. The client reviewer independently rechecked
+the fix and both targeted regression paths; no unresolved finding remained in
+that scoped recheck.
+
+The Anvil integration reproduces a real local reorg with evm_snapshot/evm_revert,
+then proxies the orphan receipt alongside canonical chain state; the runtime rejects
+it. This is separate from the documented risk of later reorgs after genuine confirmation.
+
+### Limits
+
+These are independent AI reviews and execution tests, not a third-party institutional
+audit or a guarantee against an adversarial RPC fabricating all chain data. Share
+calls made manually/by a compromised operator can bypass off-chain asset caps but
+always return funds to the owner. Supply price/bad-debt risk belongs to the protocol
+position. Constructor addresses and deployed runtime must still be verified before
+any owner authorization; no deployed production adapter exists yet.
+
+
+### Final follow-up verification
+
+- 34 Node tests, 20 isolated Solidity tests (including 256 fuzz cases), one Anvil
+  signing/reorg integration and 5 canonical-mainnet fork tests passed: 60 test cases.
+- Fork tests were rerun successfully at block 26333079 with exact unauthorized /
+  insufficient-liquidity revert reasons. The final run used a temporary localhost
+  read-only relay to work around Foundry's TLS handshake failures. It forwarded
+  only read RPC methods to the same public mainnet providers, was then stopped,
+  and was never an on-chain transaction endpoint.
+- Some direct Foundry reruns failed in fork setup before any test ran due to TLS
+  connection errors. Those failures are recorded as infrastructure failures, not
+  passed contract tests. Offline CI explicitly skips the 5 network fork tests.
+- Reviewed production contract SHA-256:
+  `fa1c9d8a4f1dfb2b5d291c5c64e3f1d56c31eaed9265caffe3433fa7dcf2c4e5`.

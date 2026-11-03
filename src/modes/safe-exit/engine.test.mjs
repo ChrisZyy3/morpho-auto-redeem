@@ -14,7 +14,7 @@ function fixture() {
  const io={
   load:()=>structuredClone(state),save:(next)=>{calls.push('save');state=structuredClone(next);},day:()=> '2026-11-03',time:()=>50000,
   plan:async()=>({assets:100n,shares:0n,estimatedAssets:100n}),fees:async()=>({maxFeePerGas:5n,maxPriorityFeePerGas:1n}),
-  simulateAndEstimate:async()=>{calls.push('simulate');return 100n;},balance:async()=>5000n,nonce:async()=>7,
+  simulateAndEstimate:async()=>{calls.push('simulate');return 100n;},balance:async()=>5000n,nonce:async()=>state.pending?8:7,
   sign:async()=>{calls.push('sign');return {hash,raw:'0x1234'};},
   broadcast:async()=>{calls.push('broadcast');},receipt:async()=>null,
  };
@@ -134,4 +134,12 @@ test('pending recovery checks nonce rollback before receipt lookup or rebroadcas
  const saved=f.state();saved.lastConfirmedNonce=7;f.io.save(saved);f.calls.length=0;
  f.io.nonce=async()=>7;f.io.time=()=>90000;f.io.receipt=async()=>assert.fail('rollback must be checked first');
  await assert.rejects(exitTick(f.io,cfg),/nonce rolled back/);assert.deepEqual(f.calls,[]);
+});
+
+test('an apparent receipt cannot finalize while canonical latest nonce still equals pending nonce',async()=>{
+ const f=fixture();await exitTick(f.io,cfg);f.calls.length=0;
+ f.io.nonce=async()=>7;
+ f.io.receipt=async()=>({confirmations:3,status:'success',gasUsed:80n,effectiveGasPrice:4n,transactionHash:hash});
+ assert.equal((await exitTick(f.io,cfg)).event,'receipt_inconsistent');
+ assert.equal(f.state().pending.hash,hash);assert.deepEqual(f.state().spent,{});assert.deepEqual(f.calls,[]);
 });

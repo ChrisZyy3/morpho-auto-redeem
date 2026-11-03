@@ -93,6 +93,11 @@ export async function createExitIO(config, journal, privateKey) {
       let receipt;
       try {receipt=await client.getTransactionReceipt({hash});}
       catch(error) {if(error.name==='TransactionReceiptNotFoundError') return null; throw error;}
+      if(!receipt.blockHash) return null;
+      let canonical;
+      try { canonical=await client.getBlock({blockNumber:receipt.blockNumber}); }
+      catch(error) {if(error.name==='BlockNotFoundError') return null;throw error;}
+      if(!canonical.hash || canonical.hash.toLowerCase()!==receipt.blockHash.toLowerCase()) return null;
       let assetsReceived=0n;
       if(receipt.status==='success') {
         const transferAbi=parseAbi(['event Transfer(address indexed from,address indexed to,uint256 value)']);

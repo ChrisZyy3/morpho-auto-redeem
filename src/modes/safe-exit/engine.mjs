@@ -31,6 +31,9 @@ export async function exitTick(io, config) {
     }
     if (receipt.confirmations < config.confirmations) return { event: 'confirming', hash: state.pending.hash };
     if (receipt.transactionHash.toLowerCase() !== state.pending.hash.toLowerCase()) throw new ExitError('RECEIPT_MISMATCH');
+    // Confirm inclusion against the current account state after reading the receipt.
+    // Mixed RPC backends may return an orphan receipt alongside a canonical pending nonce.
+    if (await io.nonce('latest') <= state.pending.nonce) return { event: 'receipt_inconsistent', hash: state.pending.hash };
     // Use the original reservation day. Never reset old pending cost into today's budget.
     state.spent[state.pending.day] = BigInt(state.spent[state.pending.day] || '0')
       + receipt.gasUsed * receipt.effectiveGasPrice;

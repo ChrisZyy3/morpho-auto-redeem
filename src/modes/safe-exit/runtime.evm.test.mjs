@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { createPublicClient, createWalletClient, http, parseAbi, parseEther, keccak256 } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { exitConfig, createExitIO } from './runtime.mjs';
@@ -45,7 +46,9 @@ test('local EVM: actual simulation, signing, durable broadcast, receipt and USDC
  EXECUTOR_CODE_HASH:keccak256(code),BOT_PRIVATE_KEY:operatorKey,LIVE_CONFIRMATION:'WITHDRAW_TO_OWNER',MAX_WITHDRAW_USDC:'2000',MAX_FEE_GWEI:'100',MAX_PRIORITY_GWEI:'5',MAX_TX_ETH:'0.1',DAILY_GAS_ETH:'1'},true);
  const journal=openJournal(join(dir,'state.json'),'evm');t.after(()=>{journal.close();rmSync(dir,{recursive:true,force:true});});
  const io=await createExitIO(cfg,journal,operatorKey);
+ const snapshotId=await client.request({method:'evm_snapshot',params:[]});
  const result=await exitTick(io,cfg);assert.equal(result.event,'withdraw_submitted');
+ const staleReceipt=await client.request({method:'eth_getTransactionReceipt',params:[result.hash]});
  const pending=journal.load().pending;assert.equal(pending.hash,result.hash);
  await client.request({method:'anvil_mine',params:['0x3']});
  assert.equal((await exitTick(io,cfg)).event,'withdraw_confirmed');
@@ -58,4 +61,22 @@ test('local EVM: actual simulation, signing, durable broadcast, receipt and USDC
  await assert.rejects(createExitIO({...cfg,codeHash:'0x'+'0'.repeat(64)},journal,operatorKey));
  hash=await wallet.writeContract({address:MORPHO_BLUE,abi:morphoAbi,functionName:'setAuthorization',args:[bot.address,true]});await client.waitForTransactionReceipt({hash});
  await assert.rejects(createExitIO(cfg,journal,operatorKey));
+ // Reorg the withdrawal away, then emulate a stale receipt backend mixed with the current chain.
+ await client.request({method:'evm_revert',params:[snapshotId]});
+ await client.request({method:'anvil_mine',params:['0x4']});
+ const canonical=await client.getBlock({blockNumber:BigInt(staleReceipt.blockNumber)});
+ assert.notEqual(canonical.hash,staleReceipt.blockHash);
+ const proxy=createHttpServer(async(req,res)=>{
+  let text='';for await(const chunk of req)text+=chunk;
+  const call=JSON.parse(text);
+  try {
+   const result=call.method==='eth_getTransactionReceipt'?staleReceipt:await client.request({method:call.method,params:call.params});
+   res.setHeader('content-type','application/json');res.end(JSON.stringify({jsonrpc:'2.0',id:call.id,result}));
+  }catch{res.end(JSON.stringify({jsonrpc:'2.0',id:call.id,error:{code:-32000,message:'local test error'}}));}
+ });
+ proxy.listen(0,'127.0.0.1');await once(proxy,'listening');
+ t.after(()=>new Promise(resolve=>{proxy.closeAllConnections();proxy.close(resolve);}));
+ const staleIO=await createExitIO({...cfg,rpcUrl:`http://127.0.0.1:${proxy.address().port}`},journal,operatorKey);
+ assert.equal(await staleIO.receipt(result.hash),null,'orphan receipt must not finalize a withdrawal');
+
 });
