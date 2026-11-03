@@ -5,7 +5,8 @@ import { resolve } from 'node:path';
 import { exitTick } from './engine.mjs';
 import { openJournal } from './journal.mjs';
 import { exitConfig, createExitIO } from './runtime.mjs';
-import { log, safeErrorDetails } from '../auto-withdraw/safe-monitor.mjs';
+import { safeExitError } from './errors.mjs';
+import { log } from '../auto-withdraw/safe-monitor.mjs';
 
 async function main() {
   loadEnv({path:process.env.EXIT_ENV_FILE || '.env.exit.local',quiet:true});
@@ -24,7 +25,7 @@ async function main() {
         const result=await exitTick(io,config);
         log(result.event,Object.fromEntries(Object.entries(result).filter(([key])=>key!=='event').map(([k,v])=>[k,typeof v==='bigint'?String(v):v])));
       } catch(error) {
-        log('exit_error',safeErrorDetails(error));
+        log('exit_error',safeExitError(error));
         // Fail closed: journal/signing/nonce errors must be inspected before restart.
         throw error;
       }
@@ -37,4 +38,4 @@ async function main() {
     journal.close();
   }
 }
-main().catch((error)=>{log('exit_fatal',safeErrorDetails(error));process.exitCode=1;});
+main().catch((error)=>{log('exit_fatal',safeExitError(error));process.exitCode=1;});

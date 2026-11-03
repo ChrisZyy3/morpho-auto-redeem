@@ -42,7 +42,9 @@ reported as reverts. Success also requires a USDC Transfer event from Morpho to
 the fixed owner; the confirmed log includes the received raw USDC units. Cost is charged to the UTC day on which the transaction was
 reserved, even if confirmation crosses midnight. Nonce rollback stops execution.
 Non-broadcast RPC errors, simulation errors and journal errors stop the worker with
-sanitized logs for manual inspection; there is no automatic live LaunchAgent yet.
+sanitized logs for manual inspection; allowlisted exit error codes identify
+configuration, deployment hash, authorization, journal and nonce stops without
+echoing provider messages or secrets; there is no automatic live LaunchAgent yet.
 
 Pending transactions are not automatically replaced or cancelled. Inspect them
 before manual action. Never delete a journal, initialized marker or lock to resolve
@@ -52,7 +54,10 @@ Use a dedicated bot account and one state path; changing/deleting paths or state
 invalidates budget and concurrency guarantees. Three confirmations do not eliminate
 reorg risk; accounting is not a finality oracle.
 
-Liquidity plans use stored same-block state with virtual shares. They are estimates;
+Liquidity plans use stored same-block state with virtual shares and always request
+exact assets to enforce the per-withdrawal cap after interest accrual. This can leave
+rounding dust; amounts below MIN_WITHDRAW_USDC need a separately reviewed final exit.
+Plans are estimates;
 simulation may reject them after accrual, rounding or racing withdrawals. No guaranteed
 capture, mempool strategy, allocator or intra-transaction liquidity capture is provided.
 

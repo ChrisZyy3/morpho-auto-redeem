@@ -72,10 +72,10 @@ test('a receipt from an earlier day is charged to its reservation day, and nonce
  assert.equal(f.state().spent['2026-11-03'],'320');assert.equal(f.state().spent['2026-11-04'],undefined);
  await assert.rejects(exitTick(f.io,cfg),/nonce rolled back/);
 });
-test('liquidity plan handles full shares, partial assets, zero liquidity and threshold',()=>{
+test('liquidity plan handles full and partial exact assets, zero liquidity and threshold',()=>{
  const market=[1000000n,1000000n,900000n];const position=[500000n];
  assert.equal(planWithdrawal(position,market,1n).assets,100000n);
- assert.equal(planWithdrawal(position,[1000000n,1000000n,0n],1n).shares,500000n);
+ assert.equal(planWithdrawal(position,[1000000n,1000000n,0n],1n).assets,250000n);
  assert.equal(planWithdrawal(position,[1000000n,1000000n,1000000n],1n),null);
  assert.equal(planWithdrawal(position,market,100001n),null);
 });
@@ -106,4 +106,32 @@ test('deleting an initialized journal never resets spending or pending state',()
 test('withdrawal cap forces exact asset amount even with full liquidity',()=>{
  const p=planWithdrawal([500000n],[1000000n,1000000n,0n],1n,100n);
  assert.equal(p.assets,100n);assert.equal(p.shares,0n);
+});
+
+test('exit guards preserve actionable fixed reasons without leaking provider messages',async()=>{
+ const {ExitError,safeExitError}=await import('./errors.mjs');
+ assert.equal(safeExitError(new ExitError('CODE_HASH')).code,'CODE_HASH');
+ assert.equal(safeExitError(new ExitError('JOURNAL_LOCKED')).code,'JOURNAL_LOCKED');
+ assert.ok(!JSON.stringify(safeExitError(Error('TEST_ONLY_PRIVATE_RPC_URL'))).includes('TEST_ONLY'));
+});
+
+test('UTC rollover during preflight or signing rechecks the actual reservation day budget',async()=>{
+ for(const stage of ['simulation','signing']) {
+  const f=fixture();f.io.save({spent:{'2026-11-04':'1600'},pending:null});f.calls.length=0;
+  const change=()=>{f.io.day=()=> '2026-11-04';};
+  if(stage==='simulation')f.io.simulateAndEstimate=async()=>{change();return 100n;};
+  else f.io.sign=async()=>{change();return {hash,raw:'0x1234'};};
+  assert.equal((await exitTick(f.io,cfg)).event,'budget_limit');
+  assert.equal(f.state().pending,null);assert.ok(!f.calls.includes('broadcast'));
+ }
+});
+test('interest cannot inflate a capped worker withdrawal because plans use exact assets',()=>{
+ const p=planWithdrawal([2000000000n],[1000_000000n,2000000000n,0n],1n,1000_000000n);
+ assert.equal(p.shares,0n);assert.ok(p.assets<=1000_000000n);
+});
+test('pending recovery checks nonce rollback before receipt lookup or rebroadcast',async()=>{
+ const f=fixture();f.io.nonce=async()=>8;await exitTick(f.io,cfg);f.calls.length=0;
+ const saved=f.state();saved.lastConfirmedNonce=7;f.io.save(saved);f.calls.length=0;
+ f.io.nonce=async()=>7;f.io.time=()=>90000;f.io.receipt=async()=>assert.fail('rollback must be checked first');
+ await assert.rejects(exitTick(f.io,cfg),/nonce rolled back/);assert.deepEqual(f.calls,[]);
 });
