@@ -119,3 +119,7 @@ any owner authorization; no deployed production adapter exists yet.
   passed contract tests. Offline CI explicitly skips the 5 network fork tests.
 - Reviewed production contract SHA-256:
   `fa1c9d8a4f1dfb2b5d291c5c64e3f1d56c31eaed9265caffe3433fa7dcf2c4e5`.
+
+- One CI Anvil test initially raced automining and captured a null receipt. The
+  fixture now waits for mining before capturing the receipt used in its reorg
+  scenario; this was a test synchronization defect, not a skipped security check.

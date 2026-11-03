@@ -48,7 +48,9 @@ test('local EVM: actual simulation, signing, durable broadcast, receipt and USDC
  const io=await createExitIO(cfg,journal,operatorKey);
  const snapshotId=await client.request({method:'evm_snapshot',params:[]});
  const result=await exitTick(io,cfg);assert.equal(result.event,'withdraw_submitted');
+ await client.waitForTransactionReceipt({hash:result.hash});
  const staleReceipt=await client.request({method:'eth_getTransactionReceipt',params:[result.hash]});
+ assert.ok(staleReceipt,'wait for actual mining before capturing the orphan-receipt fixture');
  const pending=journal.load().pending;assert.equal(pending.hash,result.hash);
  await client.request({method:'anvil_mine',params:['0x3']});
  assert.equal((await exitTick(io,cfg)).event,'withdraw_confirmed');
