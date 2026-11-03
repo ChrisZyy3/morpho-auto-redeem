@@ -1,0 +1,28 @@
+name: Safe monitor tests
+
+on:
+  push:
+    branches: ["master", "feat/safe-morpho-auto-exit"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies (no lifecycle scripts)
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Test arithmetic and read-only monitor integration
+        run: node --test src/modes/auto-withdraw/safe-math.test.mjs src/modes/auto-withdraw/safe-monitor.test.mjs
+      - name: Check monitoring scripts parse
+        run: |
+          node --check src/modes/auto-withdraw/safe-math.mjs
+          node --check src/modes/auto-withdraw/safe-monitor.mjs
