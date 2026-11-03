@@ -43,3 +43,9 @@ coverage/
 *.pid
 *.seed
 *.pid.lock
+
+# Phase 2 signing environment and durable transaction journal
+.env.exit.local
+state/
+artifacts/
+cache/
